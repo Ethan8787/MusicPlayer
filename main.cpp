@@ -3,7 +3,6 @@
 #include "MainWindow.h"
 #include <QStyleFactory>
 #include <QPalette>
-#include <windows.h>
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv); // Qt 應用程式物件
@@ -28,9 +27,15 @@ int main(int argc, char *argv[]) {
 
     QApplication::setPalette(dark); // 套用
 
+    const QFont font("SF Pro Display", 12);
+    QApplication::setFont(font);
+
     // StyleSheet
     app.setStyleSheet(R"(
-    QWidget { color: #E6E6E6; font-size: 13px; }
+    QWidget {
+        color: #E6E6E6;
+        font-size: 13px;
+    }
 
     QPushButton {
         background: rgba(255,255,255,0.08);
@@ -40,13 +45,44 @@ int main(int argc, char *argv[]) {
         min-width: 14px;
         min-height: 14px;
     }
-    QPushButton:hover  { background: rgba(255,255,255,0.20); }
-    QPushButton:pressed{ background: rgba(255,255,255,0.35); }
+
+    QPushButton:hover  {
+        background: rgba(255,255,255,0.20);
+    }
+
+    QPushButton:pressed {
+        background: rgba(255,255,255,0.35);
+    }
 
     QPushButton#primaryCtrl {
         padding: 2px 4px;
         border-radius: 9px;
         font-weight: 600;
+    }
+
+    QPushButton:hover {
+        background: rgba(255,255,255,0.15);
+    }
+
+    QListWidget {
+        outline: none;
+        selection-background-color: transparent;
+        color: #FFFFFF;
+        selection-color: #5CC8FF;
+    }
+
+    QListWidget::item:selected, QListWidget::item:selected:!active, QListWidget::item:selected:active, QListWidget::item:selected:focus, QListWidget::item:selected:!focus {
+        background: transparent;
+        color: #5CC8FF;
+        font-weight: bold;
+    }
+
+    QListWidget::item:hover {
+        background: rgba(255,255,255,0.08);
+    }
+
+    QListWidget::item:selected:hover, QListWidget::item:selected:!active:hover, QListWidget::item:selected:active:hover, QListWidget::item:selected:focus:hover, QListWidget::item:selected:!focus:hover {
+        background: rgba(255,255,255,0.08);
     }
 
     QSlider::groove:horizontal {
@@ -64,7 +100,7 @@ int main(int argc, char *argv[]) {
     }
 
     QSlider::sub-page:horizontal {
-        background: rgba(255,255,255,0.60);
+        background: #5CC8FF;
         border-radius: 3px;
     }
 
@@ -77,7 +113,14 @@ int main(int argc, char *argv[]) {
         background: #2B2B2C;
         border: 1px solid rgba(255,255,255,0.12);
     }
-    QMenu::item:selected { background: rgba(255,255,255,0.12); }
+
+    QMenu::item:selected {
+        background: rgba(255,255,255,0.12);
+    }
+
+    QStatusBar {
+        color:#DDDDDD;
+    }
 )");
 
     MainWindow w; // 主視窗物件

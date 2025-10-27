@@ -21,15 +21,19 @@ protected:
     void mousePressEvent(QMouseEvent *e) override {
         if (orientation() == Qt::Horizontal && e->button() == Qt::LeftButton) {
             const double x = e->position().x();
-            const double p = std::clamp(x / static_cast<double>(width()), 0.0, 1.0);
-            const int v = static_cast<int>(std::lround(p * (maximum() - minimum()) + minimum()));
-            setValue(v);
-            emit sliderMoved(v);
+            constexpr double handleHalf = 4.0;
+            const double ratio = std::clamp((x - handleHalf) / (width() - 2 * handleHalf), 0.0, 1.0);
+            const int value = static_cast<int>(std::round(ratio * (maximum() - minimum()) + minimum()));
+
+            setValue(value);
+            emit sliderMoved(value);
             emit sliderReleased();
             e->accept();
         }
+
         QSlider::mousePressEvent(e);
     }
+
 };
 
 // 音量條
@@ -44,10 +48,12 @@ protected:
     void mousePressEvent(QMouseEvent *e) override {
         if (orientation() == Qt::Horizontal && e->button() == Qt::LeftButton) {
             const double x = e->position().x();
-            const double p = std::clamp(x / static_cast<double>(width()), 0.0, 1.0);
-            const int v = static_cast<int>(std::lround(p * (maximum() - minimum()) + minimum()));
-            setValue(v);
-            emit sliderMoved(v);
+            constexpr double handleHalf = 4.0;
+            const double ratio = std::clamp((x - handleHalf) / (width() - 2 * handleHalf), 0.0, 1.0);
+            const int value = static_cast<int>(std::round(ratio * (maximum() - minimum()) + minimum()));
+
+            setValue(value);
+            emit sliderMoved(value);
             emit sliderReleased();
             e->accept();
         }
@@ -119,9 +125,11 @@ private:
 
     void enqueue(const QList<QUrl> &urls);
 
+    static QString mp3BasePath();
+
     void playIndex(int idx);
 
-    void updateTimeLabels(qint64 pos, qint64 dur);
+    void updateTimeLabels(qint64 pos, qint64 dur) const;
 
     static QString formatTime(qint64 ms);
 

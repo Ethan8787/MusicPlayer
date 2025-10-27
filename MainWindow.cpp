@@ -2,7 +2,7 @@
 
 #include <QtMultimedia/QMediaPlayer>
 #include <QtMultimedia/QAudioOutput>
-
+#include <QtMultimedia/QMediaMetaData>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSlider>
@@ -22,6 +22,8 @@
 #include <QtMultimedia/QMediaDevices>
 #include <QtMultimedia/QAudioDevice>
 #include <QIcon>
+
+QString exeDir = QCoreApplication::applicationDirPath();
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
@@ -56,7 +58,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     setAcceptDrops(true);
     statusBar()->showMessage("Ready"); // 就緒
-    statusBar()->setStyleSheet("QStatusBar{color:#DDDDDD;}");
 }
 
 MainWindow::~MainWindow() = default;
@@ -64,8 +65,14 @@ MainWindow::~MainWindow() = default;
 // UI 設定
 void MainWindow::setupUi() {
     m_list = new QListWidget(this);
-    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) {
+
+    // highlight always blue (even when sliders are clicked)
+    m_list->setSelectionBehavior(QAbstractItemView::SelectItems);
+    m_list->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_list->setFocusPolicy(Qt::NoFocus);
+    m_list->setStyleSheet("QListWidget::item:selected { color: #5CC8FF; background: transparent; font-weight: bold; }");
+
+    connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *) {
         playSelected(m_list->currentRow());
     });
 
@@ -75,7 +82,7 @@ void MainWindow::setupUi() {
     m_btnStop = new QPushButton(this);
     m_btnMute = new QPushButton(this);
 
-    QSize iconSize(12, 12);
+    constexpr QSize iconSize(12, 12);
     m_btnPrev->setIconSize(iconSize);
     m_btnPlayPause->setIconSize(iconSize);
     m_btnStop->setIconSize(iconSize);
@@ -115,14 +122,16 @@ void MainWindow::setupUi() {
 
     m_volume = new VolumeSlider(Qt::Horizontal, this);
     m_volume->setRange(0, 100);
-    m_volume->setValue(50);
-    m_audio->setVolume(0.5);
+    m_volume->setValue(100); // default 100%
+    m_audio->setVolume(1.0f); // 100% = 1.0
+
     connect(m_volume, &QSlider::valueChanged, this, [this](int v) {
-        m_audio->setVolume(static_cast<float>(v) / 100.0f);
+        const float scaled = std::clamp(static_cast<float>(v) / 100.0f, 0.0f, 1.0f);
+        m_audio->setVolume(scaled);
     });
 
     m_seek->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_seek->setMinimumWidth(120); // optional floor
+    m_seek->setMinimumWidth(100); // optional floor
 
     const auto row = new QHBoxLayout();
     row->setContentsMargins(12, 6, 12, 8);
@@ -141,7 +150,7 @@ void MainWindow::setupUi() {
     row->addSpacing(12);
 
     row->addWidget(m_btnMute);
-    m_volume->setFixedWidth(110);
+    m_volume->setFixedWidth(100);
     row->addWidget(m_volume);
 
     const auto bottom = new QWidget(this);
@@ -162,9 +171,10 @@ void MainWindow::setupUi() {
     tb->addAction("Clear", this, &MainWindow::clearList);
     tb->addAction("Remove", this, &MainWindow::removeSelected);
 
-    const auto signature = new QLabel("Made by Ethan", this);
-    signature->setStyleSheet("color: #888888; font-size: 10pt;");
-    statusBar()->addPermanentWidget(signature);
+    auto *label = new QLabel("Made by Ethan");
+    statusBar()->addPermanentWidget(label);
+    label->setStyleSheet("color: #888888; font-size: 10pt;");
+    statusBar()->addPermanentWidget(label);
 }
 
 // 媒體狀態變更
@@ -264,8 +274,19 @@ void MainWindow::openFiles() {
         "Audio Files (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.opus)",
         "All Files (*)"
     };
-    const auto urls = QFileDialog::getOpenFileUrls(this, "Open Audio Files", QUrl(), filters.join(";;"));
-    if (!urls.isEmpty()) enqueue(urls);
+    if (const auto urls = QFileDialog::getOpenFileUrls(this, "Open Audio Files", QUrl(), filters.join(";;")); !urls.
+        isEmpty()) enqueue(urls);
+}
+
+// 取得 mp3 資料夾路徑
+QString MainWindow::mp3BasePath() {
+    QDir base(QCoreApplication::applicationDirPath());
+    base.cdUp(); // 回到 ../
+    base.cd("mp3");
+    if (!base.exists()) {
+        qWarning() << "mp3 folder not found:" << base.absolutePath();
+    }
+    return base.absolutePath();
 }
 
 // 加入播放清單
@@ -274,7 +295,15 @@ void MainWindow::enqueue(const QList<QUrl> &urls) {
     for (const QUrl &url: urls) {
         if (!isAudioUrl(url)) continue;
         m_urls.push_back(url);
-        m_list->addItem(url.fileName().isEmpty() ? url.toString() : url.fileName());
+
+        QString name = url.fileName();
+        if (!name.isEmpty()) {
+            QFileInfo fi(name);
+            name = fi.completeBaseName();
+        } else {
+            name = url.toString();
+        }
+        m_list->addItem(name);
         ++added;
     }
     if (added > 0 && m_currentIndex < 0) playIndex(0);
@@ -297,10 +326,9 @@ void MainWindow::removeSelected() {
     auto rows = m_list->selectionModel()->selectedRows();
     if (rows.isEmpty()) return;
 
-    std::sort(rows.begin(), rows.end(), [](const QModelIndex &a, const QModelIndex &b) { return a.row() > b.row(); });
+    std::ranges::sort(rows, [](const QModelIndex &a, const QModelIndex &b) { return a.row() > b.row(); });
     for (const auto &idx: rows) {
-        int r = idx.row();
-        if (r >= 0 && r < m_urls.size()) {
+        if (const int r = idx.row(); r >= 0 && r < m_urls.size()) {
             m_urls.remove(r);
             delete m_list->takeItem(r);
             if (r == m_currentIndex) {
@@ -312,35 +340,19 @@ void MainWindow::removeSelected() {
     if (m_currentIndex < 0 && !m_urls.isEmpty()) playIndex(0);
 }
 
-// 載入播放清單
-void MainWindow::loadM3U() {
-    const auto file = QFileDialog::getOpenFileName(this, "Load M3U Playlist", {},
-                                                   "Playlists (*.m3u *.m3u8);;All Files (*)");
-    if (file.isEmpty()) return;
-
-    QFile f(file);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, "Error", "Failed to open playlist.");
-        return;
-    }
-    QList<QUrl> urls;
-    QTextStream in(&f);
-    while (!in.atEnd()) {
-        QString line = in.readLine().trimmed();
-        if (line.isEmpty() || line.startsWith("#")) continue;
-        urls.push_back(QUrl::fromUserInput(line));
-    }
-    enqueue(urls);
-}
-
 // 儲存播放清單
 void MainWindow::saveM3U() {
     if (m_urls.isEmpty()) {
         QMessageBox::information(this, "Save M3U", "Playlist is empty.");
         return;
     }
-    const auto file = QFileDialog::getSaveFileName(this, "Save M3U Playlist", "playlist.m3u",
-                                                   "Playlists (*.m3u *.m3u8)");
+
+    const QString binPath = QCoreApplication::applicationDirPath();
+    const QString basePath = mp3BasePath();
+    const QString file = QFileDialog::getSaveFileName(
+        this, "Save M3U Playlist",
+        basePath + "/playlist.m3u",
+        "Playlists (*.m3u *.m3u8)");
     if (file.isEmpty()) return;
 
     QFile f(file);
@@ -348,10 +360,63 @@ void MainWindow::saveM3U() {
         QMessageBox::warning(this, "Error", "Failed to write playlist.");
         return;
     }
+
     QTextStream out(&f);
     out << "#EXTM3U\n";
-    for (const QUrl &u: m_urls) out << u.toString() << "\n";
-    statusBar()->showMessage("Playlist saved.", 3000);
+
+    for (const QUrl &u: m_urls) {
+        QString absPath = u.toLocalFile();
+        QString relPath = QDir(binPath).relativeFilePath(absPath);
+        out << relPath << "\n";
+    }
+
+    statusBar()->showMessage("Playlist saved (relative to /bin).", 3000);
+}
+
+// 載入播放清單
+void MainWindow::loadM3U() {
+    const QString basePath = mp3BasePath();
+    const QString binPath = QCoreApplication::applicationDirPath();
+
+    const auto file = QFileDialog::getOpenFileName(
+        this, "Load M3U Playlist", basePath,
+        "Playlists (*.m3u *.m3u8);;All Files (*)");
+    if (file.isEmpty()) return;
+
+    QFile f(file);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Error", "Failed to open playlist.");
+        return;
+    }
+
+    QList<QUrl> urls;
+    QTextStream in(&f);
+    const QString playlistDir = QFileInfo(file).absolutePath();
+
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith("#"))
+            continue;
+
+        QString fullPath;
+        QFileInfo fi(line);
+
+        if (fi.isAbsolute()) {
+            fullPath = line;
+        } else {
+            fullPath = QDir(playlistDir).absoluteFilePath(line);
+            if (!QFile::exists(fullPath))
+                fullPath = QDir(binPath).absoluteFilePath(line);
+            if (!QFile::exists(fullPath))
+                fullPath = QDir(basePath).absoluteFilePath(line);
+        }
+
+        if (QFile::exists(fullPath))
+            urls.push_back(QUrl::fromLocalFile(fullPath));
+    }
+
+    enqueue(urls);
+    statusBar()->showMessage("Playlist loaded (relative paths supported).", 3000);
 }
 
 // 播放選取項目
@@ -411,7 +476,7 @@ void MainWindow::onPositionChanged(qint64 pos) {
 }
 
 // 總長度變更
-void MainWindow::onDurationChanged(qint64 dur) {
+void MainWindow::onDurationChanged(const qint64 dur) {
     m_durationMs = dur;
     updateTimeLabels(m_player->position(), dur);
 }
@@ -440,7 +505,8 @@ void MainWindow::onErrorChanged() {
 
 // 音量變更
 void MainWindow::onVolumeChanged(int) const {
-    const int v = static_cast<int>(std::lround(m_audio->volume() * 100.0));
+    int v = static_cast<int>(std::lround(m_audio->volume() * 100.0));
+    v = std::clamp(v, 0, 100);
     if (m_volume->value() != v)
         m_volume->setValue(v);
 
@@ -466,19 +532,32 @@ void MainWindow::toggleMute() const {
 // 播放指定索引
 void MainWindow::playIndex(int idx) {
     if (idx < 0 || idx >= m_urls.size()) return;
+
+    for (int i = 0; i < m_list->count(); ++i) {
+        QFont f = m_list->item(i)->font();
+        f.setBold(false);
+        m_list->item(i)->setFont(f);
+    }
+
     m_currentIndex = idx;
     m_list->setCurrentRow(idx);
+
+    if (auto *item = m_list->item(idx)) {
+        QFont f = item->font();
+        f.setBold(true);
+        item->setFont(f);
+    }
 
     m_durationMs = 0;
     updateTimeLabels(0, 0);
 
     m_player->setSource(m_urls[idx]);
     m_player->play();
-    setWindowTitle(QString("MusicPlayer").arg(m_urls[idx].fileName()));
+    setWindowTitle(QString("MusicPlayer"));
 }
 
 // 更新時間標籤
-void MainWindow::updateTimeLabels(qint64 pos, qint64 dur) {
+void MainWindow::updateTimeLabels(const qint64 pos, const qint64 dur) const {
     m_lblTimeL->setText(formatTime(pos));
     m_lblTimeR->setText(formatTime(dur));
 }
@@ -486,10 +565,10 @@ void MainWindow::updateTimeLabels(qint64 pos, qint64 dur) {
 // 格式化時間
 QString MainWindow::formatTime(qint64 ms) {
     if (ms < 0) ms = 0;
-    qint64 sec = ms / 1000;
-    int h = int(sec / 3600);
-    int m = int((sec % 3600) / 60);
-    int s = int(sec % 60);
+    const qint64 sec = ms / 1000;
+    const int h = static_cast<int>(sec / 3600);
+    const int m = static_cast<int>((sec % 3600) / 60);
+    const int s = static_cast<int>(sec % 60);
     if (h > 0)
         return QString("%1:%2:%3")
                 .arg(h, 1, 10, QLatin1Char('0'))
@@ -515,6 +594,5 @@ void MainWindow::dragEnterEvent(QDragEnterEvent *event) {
 
 // 事件
 void MainWindow::dropEvent(QDropEvent *event) {
-    QList<QUrl> urls = event->mimeData()->urls();
-    if (!urls.isEmpty()) enqueue(urls);
+    if (const QList<QUrl> urls = event->mimeData()->urls(); !urls.isEmpty()) enqueue(urls);
 }
